@@ -1,147 +1,240 @@
-# Assignment Workflow Portal – Backend
+# Assignment Portal – Backend API
 
-## Overview
-
-This project is the **backend service** for the Assignment Workflow Portal built using **Node.js and Express.js**.
-
-It provides RESTful APIs for authentication, assignment management, and student submissions.
+A RESTful API built with **Node.js**, **Express.js**, and **MongoDB (Mongoose)** that powers the Assignment Workflow Portal. It supports role-based authentication (teacher / student) and a full assignment lifecycle (Draft → Published → Completed).
 
 ---
 
-## Features
+## Tech Stack
 
-### Authentication
-
-* Single login endpoint
-* Users log in using **email and password**
-* Backend returns:
-
-  * JWT token
-  * User role (teacher or student)
-
-The frontend redirects users to their dashboards based on the role.
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js |
+| Framework | Express.js v5 |
+| Database | MongoDB + Mongoose |
+| Authentication | JWT + bcryptjs |
+| Security | Helmet, express-rate-limit |
 
 ---
 
-## Assignment Workflow
+## Local Setup
 
-Assignments move through the following states:
+### Prerequisites
+- Node.js ≥ 18
+- MongoDB running locally **or** a MongoDB Atlas URI
 
-Draft → Published → Completed
+### 1. Clone & install dependencies
 
-Draft
-
-* Editable
-* Deletable
-
-Published
-
-* Visible to students
-* Cannot be deleted
-
-Completed
-
-* Locked after review
-* No further changes allowed
-
----
-
-## Teacher Capabilities
-
-Teachers can:
-
-* Create assignments
-* Edit assignments
-* Delete assignments in Draft state
-* Publish assignments
-* Mark assignments as Completed
-* View all student submissions
-
-Each submission includes:
-
-* Student name
-* Submitted answer
-* Submission date
-
-Teachers may optionally mark submissions as reviewed.
-
----
-
-## Student Capabilities
-
-Students can:
-
-* View **Published assignments**
-* Submit answers
-* View their submitted answers
-
-Restrictions:
-
-* Only one submission allowed per assignment
-* Submissions cannot be edited after submission
-
----
-
-## Technology Used
-
-* Node.js
-* Express.js
-
----
-
-## Setup Instructions
-
-Clone the repository:
-
-git clone <repository-url>
-
-Navigate to the project directory:
-
+```bash
+git clone <repo-url>
 cd assignment-portal-backend
-
-Install dependencies:
-
 npm install
+```
 
-Start the server:
+### 2. Configure environment variables
 
+Copy the example and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `5000` | Server port |
+| `MONGO_URI` | `mongodb://localhost:27017/assignment-portal` | MongoDB connection string |
+| `JWT_SECRET` | *(change this!)* | Secret key for signing JWTs |
+| `JWT_EXPIRES_IN` | `7d` | JWT expiry duration |
+
+### 3. Seed the database
+
+Creates 1 teacher + 2 student accounts:
+
+```bash
+npm run seed
+```
+
+| Role | Email | Password |
+|---|---|---|
+| Teacher | teacher@portal.com | Teacher@123 |
+| Student | student1@portal.com | Student@123 |
+| Student | student2@portal.com | Student@123 |
+
+### 4. Run the server
+
+```bash
+# Development (auto-restart with nodemon)
+npm run dev
+
+# Production
 npm start
+```
 
-The backend server will run locally on:
-
-http://localhost:5000
+Server starts at `http://localhost:5000`
 
 ---
 
-## API Responsibilities
+## API Reference
 
-The backend provides APIs for:
+All protected routes require the header:
+```
+Authorization: Bearer <token>
+```
 
-* User authentication
-* Assignment creation and management
-* Viewing assignments
-* Submitting answers
-* Viewing submissions
+### Authentication  — `/api/auth`
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/register` | Public | Register new user |
+| POST | `/api/auth/login` | Public | Login, returns JWT + role |
+| GET | `/api/auth/me` | Any | Get logged-in user profile |
+
+#### Register / Login request body
+```json
+{
+  "name": "Alice",
+  "email": "alice@example.com",
+  "password": "Secret@123",
+  "role": "teacher"
+}
+```
+
+#### Login response
+```json
+{
+  "success": true,
+  "token": "<jwt>",
+  "user": { "id": "...", "name": "Alice", "email": "...", "role": "teacher" }
+}
+```
+
+---
+
+### Assignments — `/api/assignments`
+
+#### Teacher Routes (role: teacher)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/assignments` | Create assignment (status: draft) |
+| GET | `/api/assignments?status=&page=&limit=` | List own assignments with filter + pagination |
+| GET | `/api/assignments/analytics` | Submission count per assignment |
+| GET | `/api/assignments/:id` | Get single assignment |
+| PATCH | `/api/assignments/:id` | Update assignment / advance status |
+| DELETE | `/api/assignments/:id` | Delete (draft only) |
+
+##### State Machine
+```
+Draft ──► Published ──► Completed
+```
+- **Draft**: editable, deletable
+- **Published**: visible to students, cannot be deleted
+- **Completed**: fully locked
+
+##### PATCH body examples
+```json
+// Advance to published
+{ "status": "published" }
+
+// Edit a draft
+{ "title": "New Title", "description": "...", "dueDate": "2026-04-01" }
+
+// Mark completed
+{ "status": "completed" }
+```
+
+#### Student Routes (role: student)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/assignments/student/published?page=&limit=` | List published assignments (paginated) |
+
+---
+
+### Submissions — `/api`
+
+#### Student Routes (role: student)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/assignments/:id/submit` | Submit answer (one per assignment) |
+| GET | `/api/assignments/:id/my-submission` | View own submission |
+
+##### Submit body
+```json
+{ "answer": "My answer text here" }
+```
+
+**Rules enforced:**
+- Assignment must be `published`
+- Cannot submit after the `dueDate`
+- Cannot submit twice to the same assignment
+
+#### Teacher Routes (role: teacher)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/assignments/:id/submissions` | All submissions for an assignment |
+| PATCH | `/api/submissions/:submissionId/review` | Mark a submission as reviewed |
+
+---
+
+## Project Structure
+
+```
+assignment-portal-backend/
+├── controllers/
+│   ├── authController.js        # register, login, getMe
+│   ├── assignmentController.js  # CRUD + state machine + analytics
+│   └── submissionController.js  # submit, view, review
+├── middleware/
+│   └── authMiddleware.js        # protect, teacherOnly, studentOnly
+├── models/
+│   ├── User.js                  # name, email, password (hashed), role
+│   ├── Assignment.js            # title, description, dueDate, status
+│   └── Submission.js            # assignment, student, answer, reviewed
+├── routes/
+│   ├── authRoutes.js
+│   ├── assignmentRoutes.js
+│   └── submissionRoutes.js
+├── data/
+│   └── seed.js                  # seed script
+├── .env                         # environment variables (not committed)
+├── server.js                    # app entry point
+└── package.json
+```
 
 ---
 
 ## Security
 
-* Role-based access control is implemented.
-* Teacher-only routes are protected.
-* Input validation is performed on server-side.
+- Passwords hashed with **bcryptjs** (salt rounds: 10)
+- JWTs expire in 7 days
+- **Helmet** sets secure HTTP headers
+- **Rate limiting**: 20 requests / 15 min on `/api/auth`
+- Role-based middleware on every protected route
+- Server-side input validation on all endpoints
 
 ---
 
-## Notes
+## Assumptions & Notes
 
-* The system focuses on **workflow-driven assignment management**, not only CRUD operations.
-* The backend ensures proper access control between teachers and students.
+1. A user can only be either a `teacher` or a `student` — no shared roles.
+2. Students cannot see Draft or Completed assignments.
+3. Submissions are immutable once created — no editing after submit.
+4. Teachers can only manage assignments they personally created.
+5. Due-date enforcement is server-side (submissions after `dueDate` are rejected).
+6. The `data/seed.js` script **wipes all data** before re-seeding — do not run in production.
+7. MongoDB Atlas URI can replace the default `localhost` URI in `.env`.
 
 ---
 
-## Future Enhancements
+## Development Milestones
 
-* Prevent submissions after due date
-* Pagination for assignment listings
-* Teacher dashboard analytics
+| # | Milestone | Commit Tag |
+|---|---|---|
+| 1 | Project setup + Mongoose models | `milestone-1` |
+| 2 | JWT authentication (register + login) | `milestone-2` |
+| 3 | Assignment CRUD with state machine | `milestone-3` |
+| 4 | Student view + pagination | `milestone-4` |
+| 5 | Submission workflow | `milestone-5` |
+| 6 | Analytics, security hardening, README | `milestone-6` |
