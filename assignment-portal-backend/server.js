@@ -14,7 +14,15 @@ const app = express();
 app.use(helmet());
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-app.use(cors());
+const allowedOrigins = [
+  "http://localhost:5173", // Local frontend
+  process.env.FRONTEND_URL, // Production frontend
+].filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+}));
 
 // ── Body Parsing ──────────────────────────────────────────────────────────────
 app.use(express.json());
