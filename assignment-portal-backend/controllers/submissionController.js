@@ -1,5 +1,4 @@
-const Submission = require("../models/Submission");
-const Assignment = require("../models/Assignment");
+const { Submission, Assignment, User } = require("../models");
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 const createError = (message, statusCode) => {
@@ -17,7 +16,7 @@ const submitAnswer = async (req, res, next) => {
       return next(createError("Answer is required", 400));
     }
 
-    const assignment = await Assignment.findById(req.params.id);
+    const assignment = await Assignment.findByPk(req.params.id);
     if (!assignment) return next(createError("Assignment not found", 404));
 
     // Only allow submission on Published assignments
@@ -30,28 +29,34 @@ const submitAnswer = async (req, res, next) => {
       return next(createError("Submission deadline has passed", 400));
     }
 
-    // Check for existing submission (unique index will also guard this)
+    // Check for existing submission
     const existing = await Submission.findOne({
-      assignment: assignment._id,
-      student: req.user._id,
+      where: {
+        assignmentId: assignment.id,
+        studentId: req.user.id,
+      },
     });
     if (existing) {
       return next(createError("You have already submitted an answer for this assignment", 409));
     }
 
     const submission = await Submission.create({
-      assignment: assignment._id,
-      student: req.user._id,
+      assignmentId: assignment.id,
+      studentId: req.user.id,
       answer: answer.trim(),
     });
 
-    await submission.populate("assignment", "title dueDate");
-    await submission.populate("student", "name email");
+    const populatedSubmission = await Submission.findByPk(submission.id, {
+      include: [
+        { model: Assignment, as: "assignment", attributes: ["title", "dueDate"] },
+        { model: User, as: "student", attributes: ["name", "email"] },
+      ],
+    });
 
-    res.status(201).json({ success: true, submission });
+    res.status(201).json({ success: true, submission: populatedSubmission });
   } catch (err) {
-    // Handle MongoDB duplicate key error (compound unique index)
-    if (err.code === 11000) {
+    // Handle Unique constraint error in Sequelize
+    if (err.name === "SequelizeUniqueConstraintError") {
       return next(createError("You have already submitted an answer for this assignment", 409));
     }
     next(err);
@@ -63,11 +68,15 @@ const submitAnswer = async (req, res, next) => {
 const getMySubmission = async (req, res, next) => {
   try {
     const submission = await Submission.findOne({
-      assignment: req.params.id,
-      student: req.user._id,
-    })
-      .populate("assignment", "title description dueDate status")
-      .populate("student", "name email");
+      where: {
+        assignmentId: req.params.id,
+        studentId: req.user.id,
+      },
+      include: [
+        { model: Assignment, as: "assignment", attributes: ["title", "description", "dueDate", "status"] },
+        { model: User, as: "student", attributes: ["name", "email"] },
+      ],
+    });
 
     if (!submission) {
       return res.json({ success: true, submission: null, message: "No submission found" });
@@ -85,14 +94,18 @@ const getSubmissionsForAssignment = async (req, res, next) => {
   try {
     // Ensure the assignment belongs to this teacher
     const assignment = await Assignment.findOne({
-      _id: req.params.id,
-      createdBy: req.user._id,
+      where: {
+        id: req.params.id,
+        createdBy: req.user.id,
+      },
     });
     if (!assignment) return next(createError("Assignment not found", 404));
 
-    const submissions = await Submission.find({ assignment: req.params.id })
-      .populate("student", "name email")
-      .sort({ createdAt: -1 });
+    const submissions = await Submission.findAll({
+      where: { assignmentId: req.params.id },
+      include: [{ model: User, as: "student", attributes: ["name", "email"] }],
+      order: [["createdAt", "DESC"]],
+    });
 
     res.json({
       success: true,
@@ -109,14 +122,13 @@ const getSubmissionsForAssignment = async (req, res, next) => {
 // PATCH /api/submissions/:submissionId/review
 const markReviewed = async (req, res, next) => {
   try {
-    const submission = await Submission.findById(req.params.submissionId).populate(
-      "assignment",
-      "createdBy"
-    );
+    const submission = await Submission.findByPk(req.params.submissionId, {
+      include: [{ model: Assignment, as: "assignment" }],
+    });
     if (!submission) return next(createError("Submission not found", 404));
 
     // Ensure only the assignment's teacher can mark it reviewed
-    if (submission.assignment.createdBy.toString() !== req.user._id.toString()) {
+    if (submission.assignment.createdBy !== req.user.id) {
       return next(createError("Not authorised to review this submission", 403));
     }
 

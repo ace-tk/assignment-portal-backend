@@ -1,32 +1,42 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
-const submissionSchema = new mongoose.Schema(
+const Submission = sequelize.define(
+  "Submission",
   {
-    assignment: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Assignment",
-      required: true,
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
     },
-    student: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+    assignmentId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    studentId: {
+      type: DataTypes.UUID,
+      allowNull: false,
     },
     answer: {
-      type: String,
-      required: [true, "Answer is required"],
-      trim: true,
-      minlength: [1, "Answer cannot be empty"],
+      type: DataTypes.TEXT,
+      allowNull: false,
+      validate: {
+        notEmpty: true,
+      },
     },
     reviewed: {
-      type: Boolean,
-      default: false,
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
     },
   },
-  { timestamps: true }
+  {
+    indexes: [
+      {
+        unique: true,
+        fields: ["assignmentId", "studentId"],
+      },
+    ],
+  }
 );
 
-// Enforce one submission per student per assignment
-submissionSchema.index({ assignment: 1, student: 1 }, { unique: true });
-
-module.exports = mongoose.model("Submission", submissionSchema);
+module.exports = Submission;

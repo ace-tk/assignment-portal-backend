@@ -1,5 +1,4 @@
-const Assignment = require("../models/Assignment");
-const Submission = require("../models/Submission");
+const { Assignment, Submission, User } = require("../models");
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 const createError = (message, statusCode) => {
@@ -22,7 +21,7 @@ const createAssignment = async (req, res, next) => {
       title,
       description,
       dueDate,
-      createdBy: req.user._id,
+      createdBy: req.user.id,
     });
 
     res.status(201).json({ success: true, assignment });
@@ -36,14 +35,16 @@ const createAssignment = async (req, res, next) => {
 const getAssignments = async (req, res, next) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
-    const filter = { createdBy: req.user._id };
+    const filter = { createdBy: req.user.id };
     if (status) filter.status = status;
 
-    const skip = (Number(page) - 1) * Number(limit);
-    const [assignments, total] = await Promise.all([
-      Assignment.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
-      Assignment.countDocuments(filter),
-    ]);
+    const offset = (Number(page) - 1) * Number(limit);
+    const { rows: assignments, count: total } = await Assignment.findAndCountAll({
+      where: filter,
+      order: [["createdAt", "DESC"]],
+      offset,
+      limit: Number(limit),
+    });
 
     res.json({
       success: true,
@@ -62,8 +63,10 @@ const getAssignments = async (req, res, next) => {
 const getAssignmentById = async (req, res, next) => {
   try {
     const assignment = await Assignment.findOne({
-      _id: req.params.id,
-      createdBy: req.user._id,
+      where: {
+        id: req.params.id,
+        createdBy: req.user.id,
+      },
     });
     if (!assignment) return next(createError("Assignment not found", 404));
     res.json({ success: true, assignment });
@@ -77,8 +80,10 @@ const getAssignmentById = async (req, res, next) => {
 const updateAssignment = async (req, res, next) => {
   try {
     const assignment = await Assignment.findOne({
-      _id: req.params.id,
-      createdBy: req.user._id,
+      where: {
+        id: req.params.id,
+        createdBy: req.user.id,
+      },
     });
     if (!assignment) return next(createError("Assignment not found", 404));
 
@@ -122,8 +127,10 @@ const updateAssignment = async (req, res, next) => {
 const deleteAssignment = async (req, res, next) => {
   try {
     const assignment = await Assignment.findOne({
-      _id: req.params.id,
-      createdBy: req.user._id,
+      where: {
+        id: req.params.id,
+        createdBy: req.user.id,
+      },
     });
     if (!assignment) return next(createError("Assignment not found", 404));
 
@@ -131,7 +138,7 @@ const deleteAssignment = async (req, res, next) => {
       return next(createError("Only draft assignments can be deleted", 403));
     }
 
-    await assignment.deleteOne();
+    await assignment.destroy();
     res.json({ success: true, message: "Assignment deleted" });
   } catch (err) {
     next(err);
@@ -143,18 +150,21 @@ const deleteAssignment = async (req, res, next) => {
 const getPublishedAssignments = async (req, res, next) => {
   try {
     const { page = 1, limit = 10 } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const offset = (Number(page) - 1) * Number(limit);
 
-    const now = new Date();
-
-    const [assignments, total] = await Promise.all([
-      Assignment.find({ status: "published" })
-        .populate("createdBy", "name email")
-        .sort({ dueDate: 1 })
-        .skip(skip)
-        .limit(Number(limit)),
-      Assignment.countDocuments({ status: "published" }),
-    ]);
+    const { rows: assignments, count: total } = await Assignment.findAndCountAll({
+      where: { status: "published" },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["name", "email"],
+        },
+      ],
+      order: [["dueDate", "ASC"]],
+      offset,
+      limit: Number(limit),
+    });
 
     res.json({
       success: true,
@@ -172,13 +182,15 @@ const getPublishedAssignments = async (req, res, next) => {
 // GET /api/assignments/analytics
 const getTeacherAnalytics = async (req, res, next) => {
   try {
-    const assignments = await Assignment.find({ createdBy: req.user._id }).lean();
+    const assignments = await Assignment.findAll({
+      where: { createdBy: req.user.id },
+    });
 
     const analytics = await Promise.all(
       assignments.map(async (a) => {
-        const submissionCount = await Submission.countDocuments({ assignment: a._id });
+        const submissionCount = await Submission.count({ where: { assignmentId: a.id } });
         return {
-          assignmentId: a._id,
+          assignmentId: a.id,
           title: a.title,
           status: a.status,
           dueDate: a.dueDate,

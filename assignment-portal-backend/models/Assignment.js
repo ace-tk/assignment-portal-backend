@@ -1,41 +1,40 @@
-const mongoose = require("mongoose");
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/database");
 
 const VALID_STATUSES = ["draft", "published", "completed"];
 
-const assignmentSchema = new mongoose.Schema(
-  {
-    title: {
-      type: String,
-      required: [true, "Title is required"],
-      trim: true,
-      minlength: [3, "Title must be at least 3 characters"],
-      maxlength: [200, "Title cannot exceed 200 characters"],
-    },
-    description: {
-      type: String,
-      required: [true, "Description is required"],
-      trim: true,
-    },
-    dueDate: {
-      type: Date,
-      required: [true, "Due date is required"],
-    },
-    status: {
-      type: String,
-      enum: VALID_STATUSES,
-      default: "draft",
-    },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+const Assignment = sequelize.define("Assignment", {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+  title: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    validate: {
+      len: [3, 200],
     },
   },
-  { timestamps: true }
-);
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+  },
+  dueDate: {
+    type: DataTypes.DATE,
+    allowNull: false,
+  },
+  status: {
+    type: DataTypes.ENUM(...VALID_STATUSES),
+    defaultValue: "draft",
+  },
+  createdBy: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+});
 
-// Valid state transitions
-assignmentSchema.statics.validTransition = function (from, to) {
+Assignment.validTransition = function (from, to) {
   const transitions = {
     draft: ["published"],
     published: ["completed"],
@@ -44,4 +43,4 @@ assignmentSchema.statics.validTransition = function (from, to) {
   return transitions[from] && transitions[from].includes(to);
 };
 
-module.exports = mongoose.model("Assignment", assignmentSchema);
+module.exports = Assignment;

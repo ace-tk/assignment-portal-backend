@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const mongoose = require("mongoose");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
@@ -30,13 +29,14 @@ const authLimiter = rateLimit({
 });
 app.use("/api/auth", authLimiter);
 
+const { sequelize } = require("./models");
+
 // ── DB Connection ────────────────────────────────────────────────────────────
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
+sequelize
+  .sync({ alter: true }) // Synchronize models with the database
+  .then(() => console.log("✅ SQLite Database & Tables synced"))
   .catch((err) => {
-    console.error("❌ MongoDB connection error:", err.message);
-    process.exit(1);
+    console.error("⚠️ SQLite connection error:", err.message);
   });
 
 // ── Routes ───────────────────────────────────────────────────────────────────
